@@ -229,6 +229,14 @@ def _clean(text: str) -> str:
 ASK_LIST = [(intent, i, ask) for intent, asks in ASKS.items() for i, ask in enumerate(asks)]
 
 
+def set_excluded_intents(excluded: list[str]) -> None:
+    """Drop intents listed in config.yaml (prompts.exclude_intents) before building either set."""
+    unknown = set(excluded) - set(ASKS)
+    if unknown:
+        raise ValueError(f"unknown intents in exclude_intents: {unknown}")
+    ASK_LIST[:] = [row for row in ASK_LIST if row[0] not in excluded]
+
+
 def build_a(rng: np.random.Generator, n: int) -> pd.DataFrame:
     shape = (len(ASK_LIST), len(PERSONAS_A), len(FRAMINGS_A), len(STYLES))
     total = int(np.prod(shape))
@@ -276,6 +284,7 @@ def main() -> None:
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
     pc = cfg["prompts"]
     seed = pc["seed"]
+    set_excluded_intents(pc.get("exclude_intents", []))
     # Separate child streams so changing set B never changes set A.
     rng_a, rng_b = (np.random.default_rng(s) for s in np.random.SeedSequence(seed).spawn(2))
 
