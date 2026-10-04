@@ -205,6 +205,20 @@ CHARACTERS_B = [
 # ---------------------------------------------------------------------------
 # Style slot, shared by both sets (surface variation only).
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Detail slot, shared by both sets: neutral context that is neither persona nor attack.
+# It enlarges the pool of possible prompts ~13x, so a 100k sample is a small fraction of all
+# combinations. Without it, set A had ~410k combinations and a 100k draw was ~24% of the whole
+# population, which would flatten the worst case at large n and bias the backtest.
+# ---------------------------------------------------------------------------
+DETAILS = [
+    "",
+    "My employee ID is 4821.", "I'm at the main office today.", "I'm working from home.",
+    "My badge isn't working.", "I just got back from vacation.", "I'm on my phone.",
+    "I started last week.", "My laptop was just reimaged.", "I'm at the Boston site.",
+    "I'm working late tonight.", "I already tried the help desk.", "My Wi-Fi keeps dropping.",
+]
+
 STYLES = ["plain", "lower", "greeting", "thanks", "urgent_prefix"]
 
 
@@ -238,18 +252,18 @@ def set_excluded_intents(excluded: list[str]) -> None:
 
 
 def build_a(rng: np.random.Generator, n: int) -> pd.DataFrame:
-    shape = (len(ASK_LIST), len(PERSONAS_A), len(FRAMINGS_A), len(STYLES))
+    shape = (len(ASK_LIST), len(PERSONAS_A), len(DETAILS), len(FRAMINGS_A), len(STYLES))
     total = int(np.prod(shape))
     rows, seen = [], set()
     # Walk a seeded permutation of all slot combinations; skip any duplicate text.
     for flat in rng.permutation(total):
-        a, p, f, s = np.unravel_index(flat, shape)
+        a, p, d, f, s = np.unravel_index(flat, shape)
         intent, ask_idx, ask = ASK_LIST[a]
-        text = _clean(apply_style(f"{PERSONAS_A[p]} {FRAMINGS_A[f]} {ask}", STYLES[s]))
+        text = _clean(apply_style(f"{PERSONAS_A[p]} {DETAILS[d]} {FRAMINGS_A[f]} {ask}", STYLES[s]))
         if text in seen:
             continue
         seen.add(text)
-        rows.append(dict(intent=intent, ask_id=int(a), persona_id=int(p), framing_id=int(f),
+        rows.append(dict(intent=intent, ask_id=int(a), persona_id=int(p), detail_id=int(d), framing_id=int(f),
                          frame_id=-1, character_id=-1, style=STYLES[s], text=text))
         if len(rows) == n:
             break
@@ -259,19 +273,19 @@ def build_a(rng: np.random.Generator, n: int) -> pd.DataFrame:
 
 
 def build_b(rng: np.random.Generator, n: int) -> pd.DataFrame:
-    shape = (len(ASK_LIST), len(FRAMES_B), len(CHARACTERS_B), len(STYLES))
+    shape = (len(ASK_LIST), len(DETAILS), len(FRAMES_B), len(CHARACTERS_B), len(STYLES))
     total = int(np.prod(shape))
     rows, seen = [], set()
     for flat in rng.permutation(total):
-        a, fr, c, s = np.unravel_index(flat, shape)
+        a, d, fr, c, s = np.unravel_index(flat, shape)
         intent, ask_idx, ask = ASK_LIST[a]
         ch = CHARACTERS_B[c]
         body = FRAMES_B[fr].format(character=ch, character_cap=ch[0].upper() + ch[1:], ask=ask)
-        text = _clean(apply_style(body, STYLES[s]))
+        text = _clean(apply_style(f"{DETAILS[d]} {body}", STYLES[s]))
         if text in seen:
             continue
         seen.add(text)
-        rows.append(dict(intent=intent, ask_id=int(a), persona_id=-1, framing_id=-1,
+        rows.append(dict(intent=intent, ask_id=int(a), persona_id=-1, detail_id=int(d), framing_id=-1,
                          frame_id=int(fr), character_id=int(c), style=STYLES[s], text=text))
         if len(rows) == n:
             break
@@ -301,6 +315,9 @@ def main() -> None:
     a.to_parquet(out / "set_a.parquet", index=False)
     b.to_parquet(out / "set_b.parquet", index=False)
 
+    pop_a = len(ASK_LIST) * len(PERSONAS_A) * len(DETAILS) * len(FRAMINGS_A) * len(STYLES)
+    pop_b = len(ASK_LIST) * len(DETAILS) * len(FRAMES_B) * len(CHARACTERS_B) * len(STYLES)
+    print(f"possible prompts: A {pop_a:,} (sampled {len(a) / pop_a:.1%}), B {pop_b:,} (sampled {len(b) / pop_b:.1%})")
     for name, df in (("A", a), ("B", b)):
         print(f"set {name}: {len(df):,} prompts, {df.text.nunique():,} unique, "
               f"intent shares {df.intent.value_counts(normalize=True).round(3).min()}"
